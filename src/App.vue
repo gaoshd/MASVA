@@ -316,9 +316,10 @@
     }
 
     function handleUpdateEdgeView(){
-        drawRelationForce("#relationForceView_0", 0)
-        drawRelationForce("#relationForceView_1", 1)
-        drawRelationChordView()
+        drawRelationForce("#relationForceView_0", curren_main_agent.value)
+        drawEpisodeMatrix()
+        drawEpisodeCompare([curren_episode_id.value, curren_episode_id.value])
+        // drawRelationForce("#relationForceView_1", 1)
     }
     
     function drawRelationForce(divName, agent_id) {
@@ -347,7 +348,7 @@
             const relate_svg = relationContainer.append("svg").attr("width",width).attr("height",height);
             const chart = relate_svg.append("g")
                     .attr("transform", `translate(${[offsetX,offsetY]})`);
-            const chart_text = relate_svg.append("text").text(`agent_${agent_id}_view`).attr("fill", "black").attr("x", 10).attr("y", 20).style("")
+            const chart_text = relate_svg.append("text").text(`agent_${agent_id}_view`).attr("fill", "black").attr("x", 10).attr("y", 20)
 
             sim.on("tick", redraw);
 
@@ -389,7 +390,7 @@
                         let reward_circle_node = overview_svg.select(`circle.agent_${agent_id}.episode_${d.node}`)
                         curren_step_id.value = 0
                         reward_circle_node.dispatch("click");
-                        d3.select("#relationChordView svg").remove()
+                        drawEpisodeCompare([curren_episode_id.value, curren_episode_id.value])
                     });
 
             function getRelateNodeInfo(d) {
@@ -463,110 +464,259 @@
         });
     }
 
-    function drawRelationChordView() {
-        const width = 500;
-        const height = 400;
-        const margin = 30;
-        d3.select("#relationChordView svg").remove()
-        d3.json(`./football_data_v2/episode_relate_json/agent_0_view/episode_${curren_episode_id.value}.json`).then(relate_data => {
-            const episodes = relate_data.nodes.map(d => d.node);
-            const episodes_winner = relate_data.nodes.map(d => d.winner)
-            const edges = relate_data.links
-
-            const matrix = dvj.linksToMatrix(episodes, edges, true);
-            const chord = d3.chord()
-                    .padAngle(.2)
-
-            const chords = chord(matrix);
-
-
-            const radius = height/2 - 60;
-
-            const ribbon = d3.ribbon().radius(radius);
-
-            const svg = d3.select("#relationChordView").append("svg").attr("width",width).attr("height",height);
-            const svg_text = svg.append("text").text(`relation_view`).attr("fill", "black").attr("x", 10).attr("y", 20).style("")
-            const chart = svg.append("g").attr("transform", `translate(${[width/2+margin/4, height/2+margin/4]})`);
-            chart.selectAll('path.ribbon')
-                    .data(chords)
-                    .enter().append("path").attr("class",'ribbon')
-                    .attr("d", ribbon)
-                    .style("opacity", .5)
-                    .style("fill", d => "seagreen")
-                    .attr("fill-opacity", 0.8)
-                    .on("mouseover", highlightRibbon)
-                    .on("mouseout", d => {
-                        d3.selectAll("path").classed('faded', false);
-                        d3.select('.tooltip').transition().style("opacity", 0);
-                    });
-
-            const arc = d3.arc().innerRadius(radius+2).outerRadius(radius+30);
-            chart.selectAll('path.arc')
-                    .data(chords.groups)
-                    .enter().append("path").attr("class",'arc')
-                    .attr("d", arc)
-                    .style("fill", d => agentColorScale(episodes_winner[d.index]))
-                    .attr("fill-opacity", 0.8)
-                    .on("mouseover", highlightNode)
-                    .on("mouseout", d => chart.selectAll("path").classed('faded', false));
-
-
-            chart.selectAll("text")
-                    .data(chords.groups)
-                    .enter().append("text")
-                    .attr("x", d => arc.centroid(d)[0])
-                    .attr("y", d => arc.centroid(d)[1])
-                    .text(d => episodes[d.index])
-                    .style("fill", 'black')
-                    .attr("transform",d => `rotate(${(arc.endAngle()(d) + arc.startAngle()(d))*90/Math.PI},${arc.centroid(d)})`);
-
-            const tooltip = chart.append("g")
-                                .attr("class", 'tooltip hidden')
-                                .attr("transform", `translate(${[-75, -50]})`)
-                                .style("opacity", 0)
-            tooltip.append("rect")
-                    .attr("width",150)
-                    .attr("height",100)
-                    .attr("rx", 10)
-                    .attr("ry", 10)
-                    .style("fill", 'white')
-                    .style("opacity", .8)
-                    .style("stroke",'seagreen');
-
-            const textFrom = tooltip.append("text").attr('id', 'from')
-                .attr("x", 20)
-                .attr("y", 25)
-                .text('From: ').each(function(d) {
-                        d3.select(this).append('tspan').text('')
-                        d3.select(this).append('tspan').attr("x",30).attr('dy', 15).text('');
-                    });
-
-            const textTo = tooltip.append("text").attr('id', 'to')
-                    .attr("x", 20)
-                    .attr("y", 75)
-                    .text('To: ').each(function(d) {
-                        d3.select(this).append('tspan').text('')
-                        d3.select(this).append('tspan').attr("x",30).attr('dy', 15).text('');
-                    });
-
-            function highlightNode(node) {
-                d3.selectAll("path.arc").classed('faded', d => !(d.index === node.index));
-                d3.selectAll("path.ribbon").classed('faded', edge => !(edge.source.index === node.index));
+    function drawEpisodeMatrix() {
+        d3.select("#episodeMatrixView svg").remove()
+        d3.json(`./football_data_v2/episode_r_matrix_json/agent_0_view/episode_${curren_episode_id.value}.json`).then(relate_data => {
+           
+            const items = relate_data.nodes.map(d => d.node)
+            const matrix = [];
+            const n = items.length;
+            const boxSize = 25
+            const link_values = relate_data.links.map(d => d.value).sort(d3.ascending)
+            const link_value_extent = d3.extent(link_values)
+            var matrixColorScale = d3.scaleLinear()
+                        .domain([link_value_extent[0], link_value_extent[1]])  // 输入范围
+                        .range(["white", agentColorScale(curren_main_agent.value)]);
+            const scale = (n) => {
+                const width = n * boxSize;
+                return (i) => {
+                    return i * boxSize;
+                }
             }
-            function highlightRibbon(edge) {
-                d3.selectAll("path.arc").classed('faded', node => !(node.index === edge.source.index || node.index === edge.target.index))
-                d3.selectAll("path.ribbon").classed('faded', d => !(d === edge))
-                d3.select('.tooltip').transition().style("opacity", 1);
-                d3.select('#from tspan:nth-child(1)').text(episodes[edge.source.index]);
-                d3.select('#to tspan:nth-child(1)').text(episodes[edge.target.index]);
-                d3.select('#from tspan:nth-child(2)').text(edge.source.value);
-                d3.select('#to tspan:nth-child(2)').text(edge.target.value);
+            
+            for (let i = 0; i < n; i++) {
+                const xScale = scale(n - i - 1);
+                for (let j = i + 1; j < n; j++) {
+                    const source_name = items[i]
+                    const target_name = items[j]
+                    const random = Math.floor(Math.random() * 4);
+                    const filter_data = relate_data.links.filter(d => {
+                        return d.source == source_name && d.target == target_name ? true : false
+                    })
+                    const color_value = filter_data.length > 0 ? filter_data[0].value : link_value_extent[0]
+                    matrix.push({
+                        source: items[i],
+                        target: items[j],
+                        x: xScale(j - 1),
+                        y: i * boxSize,
+                        relate_value: color_value,
+                        color: matrixColorScale(color_value)
+                    });
+                
+                }
             }
 
-            function contrast(color) {
-                const c = d3.rgb(color);
-                return (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) > 130 ? 'black' : 'white';
-            }
+            const eachRow = Math.hypot(boxSize, boxSize);
+            const margin = {top: 20, left: 20, right: 20, bottom: 20};
+            const chartHeight = eachRow * items.length;
+            const width = 250
+            const chartWidth = width - margin.left - margin.right;
+            const height = chartHeight + margin.top + margin.bottom;
+            const svg = d3.select('#episodeMatrixView').append('svg').attr('width', width).attr('height', height);
+            const labelWidth = 50;
+            
+            const group = svg.append('g').attr('transform', `translate(${margin.left}, ${margin.top})`);
+            
+            const listing = group.selectAll('g.list-item')
+                .data(items)
+                .join('g')
+                .attr('class', d => `list_item_${d}`)
+                .attr('transform', (d, i) => `translate(0, ${i * eachRow})`)
+                .on("mouseover", (d) => {
+                    console.log("123", d)
+                }).on("click", (d) => {
+                    group.selectAll("g").attr("fill", "black")
+                    group.select(`.list_item_${d}`).attr("fill", agentColorScale(curren_main_agent.value))
+                    drawEpisodeCompare([d, d])
+                })
+            
+            listing.filter((d, i) => i == 0)
+                .append('line')
+                .attr('x1', 0)
+                .attr('x2', labelWidth)
+                .attr('y1', 0)
+                .attr('y2', 0)
+                .attr('stroke', '#000')
+                .attr('stroke-width', '1.5px')
+            
+            const labels = listing.append('text')
+                .attr('text-anchor', 'end')
+                .attr('x', labelWidth - 5)
+                .attr('y', eachRow / 2 + 4)
+                .text(d => d)
+            
+            const borders = listing.append('line')
+                .attr('x1', 0)
+                .attr('x2', labelWidth)
+                .attr('y1', eachRow)
+                .attr('y2', eachRow)
+                .attr('stroke', '#000')
+                .attr('stroke-width', '1.5px');
+            
+            const circleGroup = group.append('g')
+                .attr('class', 'circleGroup')
+                .attr('transform', `translate(${labelWidth + 18}, ${eachRow / 2}) rotate(${45})`)
+            
+            const circles = circleGroup.selectAll('g.dot').data(matrix)
+                .join('g')
+                .attr('class', 'dot')
+                .attr('transform', d => `translate(${d.x}, ${d.y})`)
+                .on("mouseover", (d) => {
+                    console.log("123", d.relate_value)
+                }).on("click", (d) => {
+                    group.selectAll("g").attr("fill", "black")
+                    group.select(`.list_item_${d.source}`).attr("fill", agentColorScale(curren_main_agent.value))
+                    group.select(`.list_item_${d.target}`).attr("fill", agentColorScale(2))
+                    drawEpisodeCompare([d.source, d.target])
+                })
+            
+            circles.append('circle')
+                .attr('fill', d => d.color)
+                .attr('cx', boxSize / 2)
+                .attr('cy', boxSize / 2)
+                .attr('r', boxSize / 2 - 3)
+            
+            circles.append('rect')
+                .attr('fill', 'transparent')
+                .attr('width', boxSize)
+                .attr('height', boxSize)
+                .attr('stroke', '#000')
+                .attr('stroke-width', '1.5px')
+            
+            const twoLines = group.selectAll('scope-line')
+                .data([{
+                x1: labelWidth,
+                x2: labelWidth + boxSize,
+                y1: 0,
+                y2: 0,
+                rotate: `44.5 ${labelWidth} 0`
+                }, {
+                x1: labelWidth,
+                x2: labelWidth + boxSize,
+                y1: chartHeight,
+                y2: chartHeight,
+                rotate: `-44.5 ${labelWidth} ${chartHeight}`
+                }])
+                .join('line')
+                .attr('class', 'scope-line')
+                .attr('x1', d => d.x1)
+                .attr('x2', d => d.x2)
+                .attr('y1', d => d.y1)
+                .attr('y2', d => d.y2)
+                .attr('stroke', '#000')
+                .attr('stroke-width', '1.5px')
+                .attr('transform', d => `rotate(${d.rotate})`);
+        })
+    }
+
+    function drawEpisodeCompare(compare_episode_id) {
+        d3.select("#episodeCompareView svg").remove()
+        const thumbnail_list = ["abdomen", "right_hip", "right_knee", "left_hip", "left_knee","right_shoulder","right_elbow","left_shoulder","left_elbow", "mean_actions"]
+        const width  = 370;
+        const height = 80;
+        const margin = 15;
+        const total_width = 5 * (width + 15)
+        const total_height = 400
+        const svg = d3.select("#episodeCompareView").append("svg").attr("height",total_height).attr("width",total_width);
+        Promise.all([
+            d3.json(`../public/football_data_v2/episode_detail_json/episode_${compare_episode_id[0]}.json`),
+            d3.json(`../public/football_data_v2/episode_detail_json/episode_${compare_episode_id[1]}.json`)
+        ]).then(function(datas) {
+            const main_episode_data = datas[0][curren_main_agent.value]
+            const relate_episode_data = datas[1][curren_main_agent.value]
+            const main_action_data = main_episode_data.step_data.map((d) =>{
+                d.actions.push(d3.mean(d.actions))
+                return d.actions
+            }).filter(function(element, index) {return index % 2 === 0;})
+            const relate_action_data = relate_episode_data.step_data.map((d) =>{
+                d.actions.push(d3.mean(d.actions))
+                return d.actions
+            }).filter(function(element, index) {return index % 2 === 0;})
+
+            thumbnail_list.forEach((thumbnail_data, index) => {
+                const main_data = main_action_data.map((d, i) => {
+                    return [i, d[index]]
+                })
+                const relate_data = relate_action_data.map((d, i) => {
+                    return [i, d[index]]
+                })
+                const data = []
+                data.push(main_data)
+                data.push(relate_data)
+
+                const scaleX = d3.scaleLinear()
+                        .domain(d3.extent(d3.merge(data), d => d[0]))
+                        .range([margin,width - margin]);
+
+                const scaleY = d3.scaleLinear()
+                        .domain(d3.extent(d3.merge(data), d => d[1]))
+                        .range([height - margin,margin])
+
+
+                const colorScale = d3.scaleOrdinal([agentColorScale(curren_main_agent.value), agentColorScale(2)]).domain([0, data.length]);
+
+                const area = d3.area()
+                                .x(d => scaleX(d[0]))
+                                .y(d => scaleY(d[1]))
+                                .y1(scaleY(d3.extent(d3.merge(data), d => d[1])[0]))
+                                .curve(d3.curveCardinal);
+
+                const line = area.lineX0();
+                const xAxis = d3.axisBottom(scaleX).tickFormat("").tickSize(0)
+                const yAxis = d3.axisLeft(scaleY).tickFormat("").tickSize(0)
+
+                const thumbnail_g = svg.append("g").attr("height",height).attr("width",width).attr  ("transform", () => {
+                    let tran_x;
+                    let tran_y;
+                    if(index < 2){
+                        tran_x = index * width
+                        tran_y = 0
+                    }else if(index < 4 && index >= 2){
+                        tran_x = (index - 2) * width
+                        tran_y = height - margin
+                    }else if(index < 6 && index >= 4){
+                        tran_x = (index - 4) * width
+                        tran_y = 2 * height - margin
+                    }else if(index < 8 && index >= 6){
+                        tran_x = (index - 6) * width
+                        tran_y = 3 * height - margin
+                    }
+                    else if(index < 10 && index >= 8){
+                        tran_x = (index - 8) * width
+                        tran_y = 4 * height - margin
+                    }
+                    return "translate("+[tran_x, tran_y]+")"
+                });
+                const axes = thumbnail_g.append('g').attr("class", "axes");
+
+                data.forEach((dataset) => {
+                    const dataLine = thumbnail_g.append("g")
+                            .datum(dataset)
+                            .attr("class", "dataset")
+                    dataLine.append("path")
+                        .attr("d", area)
+                        .attr("fill", colorScale)
+                        .attr("fill-opacity", .1)
+                        .on("mouseover", function() {
+                            d3.select(this).attr("fill-opacity", 1)
+                        })
+                        .on("mouseout", function() {
+                            d3.select(this).attr("fill-opacity", .1)
+                        })
+                    dataLine.append("path")
+                        .attr("d", line)
+                        .attr("stroke", colorScale)
+                        .attr("stroke-opacity", .5)
+                        .attr("fill", "none")
+                        
+                });
+
+                axes.append('g').call(xAxis)
+                        .attr("transform", "translate("+[0, height - margin]+")");
+                axes.append('g').call(yAxis)
+                        .attr("transform", "translate("+[margin, 0]+")");
+                axes.append("text").text(`${thumbnail_data}`).attr("transform", "translate("+[15, 15]+")");
+            })
         })
         
     }
@@ -918,7 +1068,6 @@
                 back_button_g.append("rect").attr("width", 50).attr("height", 20).attr("opacity", 0.5).attr("fill", "seagreen")
                 back_button_g.append("text").attr("x", 25).attr("y", 15).text("back").attr("fill", "white").attr("text-anchor", "middle")
                 back_button_g.on("click", () => {
-                    console.log(curren_step_id.value)
                     if (curren_step_id.value -1 == -1){
                         curren_step_id.value = 0
                         return
@@ -953,7 +1102,6 @@
                     let agent_name =  d3.select(this).attr('class')
                     let agent_id = d3.select(this).attr('agent')
                     let agent_data = agent_id == 0 ? agent_0_data[curren_step_id.value].obs:agent_1_data[curren_step_id.value].obs
-                    console.log(agent_data)
                     const tipinfo = `${agent_name}_pos_z: ${agent_data.agent_pos[2]}<br/>`
                     if(d3.event.type == "mouseout" ? false:true){
                         tooltip.style("opacity", .9);
@@ -984,7 +1132,6 @@
                 }
                 
                 function updateValueImage(is_back=false) {
-                    console.log("is_back", is_back)
                     if (curren_step_id.value +1 == step_len){
                         return
                     }
@@ -1100,7 +1247,6 @@
 
             function drawActionRidgelineView(){
                 d3.select("#actionRidgelineView svg").remove()
-                console.log(step_data.map(d => d.body_info))
                 const body_flatData = step_data.map(d => {
                     let body_indicators = []
                     Object.entries(d.body_info).forEach(d1 => {
@@ -1183,7 +1329,6 @@
                     curren_step_id.value = mouse_step
                     step_circle_node.dispatch("click");
                 }
-                console.log(step_xScale(0))
                 const tip_line = actions_svg.append("line").attr("class", "tip_line").attr("x1", step_xScale(curren_step_id.value)).attr("y1", 0)
                                         .attr("x2", step_xScale(curren_step_id.value)).attr("y2", a_height)
                                         .attr("stroke", agentColorScale(2)) 
@@ -1247,6 +1392,7 @@
         }else {
             curren_main_agent.value = 0
         }
+        handleUpdateEdgeView()
         handleUpdateEpisodeValue(current_step_indicator.value)
     }
 
@@ -1294,11 +1440,19 @@
                     @update:value="handleUpdateEdgeValue"
                 />
             </n-space>
+            <n-switch style=" float: left;margin-left: 10px; margin-top: 3px;" :rail-style="railStyle" @update:value="handleUpdateAgentTypeValue">
+                <template #checked>
+                    Defender
+                </template>
+                <template #unchecked>
+                    Kicker
+                </template>
+            </n-switch>
         </div>
         <div class="edgeViewContent">
-            <div style="border-right:1px solid black; margin-left: 5px;" id="relationForceView_0"></div>
-            <div style="margin-left: 1px;" id="relationChordView"></div>
-            <div style="border-left: 1px solid black; margin-left: 1px;" id="relationForceView_1"></div>
+            <div style="border-right:1px solid gray; margin-left: 5px;" id="relationForceView_0"></div>
+            <div style="margin-left: 1px;" id="episodeMatrixView"></div>
+            <div style="margin-left: 1px;" id="episodeCompareView"></div>
         </div>
     </div>
     <div class="episodeView">
@@ -1314,14 +1468,6 @@
                 :options="episode_detail_options"
                 @update:value="handleUpdateEpisodeValue"
             />
-            <n-switch style=" float: left;margin-left: 10px; margin-top: 3px;" :rail-style="railStyle" @update:value="handleUpdateAgentTypeValue">
-                <template #checked>
-                    Defender
-                </template>
-                <template #unchecked>
-                    Kicker
-                </template>
-            </n-switch>
             <text style="margin-left: 10px; margin-top: 5px; margin-right: 10px; float: left">body_indicator:</text>
             <n-select
                 size="small"
@@ -1389,6 +1535,7 @@
         float: left;
     }
     .edgeSelectEle {
+        float: left;
         margin-top: 1px;
         margin-left: 100px;
         width: 200px;
